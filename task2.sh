@@ -9,7 +9,7 @@ handle_error() {
 # Trap errors and call the handle_error function
 trap 'handle_error $LINENO $BASH_COMMAND' ERR
 
-# URL for Debian packages (Debian Astro Maintainers)
+# URL for Debian packages 
 DEBIAN_URL="https://qa.debian.org/developer.php?email=debian-astro-maintainers%40lists.alioth.debian.org"
 
 # Fetch package list from the Debian URL
