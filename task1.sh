@@ -7,9 +7,9 @@ CLONE_DIR="/tmp/thirdparty-drivers"
 LOG_FILE="/var/log/driver_version_fetch.log"
 PACKAGE_NAME="indi-armadillo-platypus"
 
-# Function to log messages
+# Function to log messages with sudo
 log_message() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+    sudo bash -c "echo $(date '+%Y-%m-%d %H:%M:%S') - $1 >> $LOG_FILE"
 }
 
 # Function to handle errors
@@ -58,6 +58,14 @@ fetch_latest_git_hash() {
 
     echo "$latest_hash"
 }
+
+# Check if script is running with sudo
+if [ "$EUID" -ne 0 ]; then
+    echo "This script requires sudo privileges to write to $LOG_FILE."
+    sudo "$0" "$@"
+    exit 0
+fi
+
 
 # Main execution flow
 log_message "Starting driver version fetch script."
