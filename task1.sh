@@ -4,6 +4,7 @@
 REPO_URL="https://github.com/indilib/indi-3rdparty.git"
 LOCAL_DIR="$HOME/indi-3rdparty"
 LOG_FILE="$HOME/indi_driver_update.log"
+PROCESSED_FILE="$HOME/processed_drivers.log"
 
 # Function to log messages to the file
 log() {
@@ -14,6 +15,11 @@ log() {
 display() {
   echo "$1"
 }
+
+# Ensure the processed drivers log file exists
+if [ ! -f "$PROCESSED_FILE" ]; then
+  touch "$PROCESSED_FILE"
+fi
 
 # Increase Git buffer size to handle large repositories
 git config --global http.postBuffer 5242880000
@@ -71,13 +77,17 @@ for DRIVER in $DRIVERS; do
     log "No version info found for $DRIVER."
   }
 
-  # If version was found, log and display
-  if [ -n "$VERSION" ]; then
+  # Check if this version and hash have already been processed
+  if grep -q "$DRIVER:$VERSION:$HASH" "$PROCESSED_FILE"; then
+    display "Driver $DRIVER (Version: $VERSION, Hash: $HASH) has already been processed."
+    log "Driver $DRIVER (Version: $VERSION, Hash: $HASH) has already been processed."
+  else
+    # Log and display the driver information
     display "Driver: $DRIVER, Version: $VERSION, Hash: $HASH"
     log "Driver: $DRIVER, Version: $VERSION, Hash: $HASH"
-  else
-    display "Version not found for driver $DRIVER."
-    log "Version not found for driver $DRIVER."
+
+    # Record the driver as processed
+    echo "$DRIVER:$VERSION:$HASH" >> "$PROCESSED_FILE"
   fi
 
   # Go back to the parent directory
