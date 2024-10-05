@@ -1,85 +1,88 @@
 #!/bin/bash
 
-
-# Define constants
+# Define variables
 REPO_URL="https://github.com/indilib/indi-3rdparty.git"
-CLONE_DIR="/tmp/thirdparty-drivers"
-LOG_FILE="/var/log/driver_version_fetch.log"
-PACKAGE_NAME="indi-armadillo-platypus"
+LOCAL_DIR="$HOME/indi-3rdparty"
+LOG_FILE="$HOME/indi_driver_update.log"
 
-# Function to log messages with sudo
-log_message() {
-    sudo bash -c "echo $(date '+%Y-%m-%d %H:%M:%S') - $1 >> $LOG_FILE"
+# Function to log messages to the file
+log() {
+  echo "$(date): $1" >> "$LOG_FILE"
 }
 
-# Function to handle errors
-handle_error() {
-    log_message "Error: $1"
+# Function to display messages in the terminal
+display() {
+  echo "$1"
+}
+
+# Increase Git buffer size to handle large repositories
+git config --global http.postBuffer 5242880000
+log "Increased Git buffer size to 500MB."
+
+# Ensure the directory exists, clone if it does not
+if [ ! -d "$LOCAL_DIR" ]; then
+  display "Directory $LOCAL_DIR does not exist. Cloning repository..."
+  log "Directory $LOCAL_DIR does not exist. Cloning repository..."
+
+  # Clone repository with shallow depth, and limit to 1 thread
+  git clone --depth 1 --jobs 1 "$REPO_URL" "$LOCAL_DIR" --progress || {
+    display "Failed to clone repository."
+    log "Failed to clone repository."
     exit 1
-}
-
-# Clone the repository
-clone_repository() {
-    if [ -d "$CLONE_DIR" ]; then
-        log_message "Removing existing clone directory."
-        rm -rf "$CLONE_DIR" || handle_error "Failed to remove existing clone directory."
-    fi
-
-    log_message "Cloning repository from $REPO_URL."
-    git clone "$REPO_URL" "$CLONE_DIR" || handle_error "Failed to clone repository."
-}
-
-# Fetch the driver version from debian/changelog
-fetch_driver_version() {
-    local changelog_file="$CLONE_DIR/debian/changelog"
-    
-    if [ ! -f "$changelog_file" ]; then
-        handle_error "Changelog file not found: $changelog_file"
-    fi
-
-    log_message "Fetching driver version from $changelog_file."
-    local version=$(grep -A 1 "$PACKAGE_NAME" "$changelog_file" | grep -oP '\d+\.\d+\.\d+~git\S*' | head -n 1)
-    
-    if [ -z "$version" ]; then
-        handle_error "Failed to extract version from changelog."
-    fi
-
-    echo "$version"
-}
-
-# Get the latest git hash
-fetch_latest_git_hash() {
-    log_message "Fetching latest git hash."
-    local latest_hash=$(git -C "$CLONE_DIR" rev-parse HEAD)
-    
-    if [ -z "$latest_hash" ]; then
-        handle_error "Failed to retrieve latest git hash."
-    fi
-
-    echo "$latest_hash"
-}
-
-# Check if script is running with sudo
-if [ "$EUID" -ne 0 ]; then
-    echo "This script requires sudo privileges to write to $LOG_FILE."
-    sudo "$0" "$@"
-    exit 0
+  }
+else
+  display "Directory $LOCAL_DIR already exists, pulling latest changes..."
+  log "Directory $LOCAL_DIR already exists, pulling latest changes..."
+  cd "$LOCAL_DIR" && git pull || {
+    display "Failed to pull latest changes."
+    log "Failed to pull latest changes."
+    exit 1
+  }
 fi
 
+# Navigate to the directory
+cd "$LOCAL_DIR" || { display "Failed to change directory to $LOCAL_DIR."; log "Failed to change directory to $LOCAL_DIR."; exit 1; }
 
-# Main execution flow
-log_message "Starting driver version fetch script."
+# Fetch driver information
+display "Fetching driver information from the repository..."
+log "Fetching driver information from the repository."
 
-clone_repository
-driver_version=$(fetch_driver_version)
-latest_hash=$(fetch_latest_git_hash)
+# Get the list of driver directories
+DRIVERS=$(find . -maxdepth 1 -type d -not -path './.*' -not -path '.' | sed 's|^\./||')
 
-log_message "Driver Version: $driver_version"
-log_message "Latest Git Hash: $latest_hash"
+# Loop through each driver and get its version and latest git hash
+for DRIVER in $DRIVERS; do
+  display "Checking driver: $DRIVER"
+  log "Checking driver: $DRIVER"
 
-# Clean up
-log_message "Cleaning up clone directory."
-rm -rf "$CLONE_DIR" || handle_error "Failed to remove clone directory."
+  # Navigate into driver directory
+  cd "$DRIVER" || { display "Failed to change directory to $DRIVER."; log "Failed to change directory to $DRIVER."; continue; }
 
-log_message "Script completed successfully."
-exit 0
+  # Get the latest git hash for the current driver
+  HASH=$(git log -1 --format="%H" 2>/dev/null) || {
+    display "Failed to get git hash for $DRIVER."
+    log "Failed to get git hash for $DRIVER."
+    continue
+  }
+
+  # Extract version from CMakeLists.txt or a similar file if it exists
+  VERSION=$(grep -m 1 "VERSION" CMakeLists.txt 2>/dev/null | cut -d ' ' -f 2 | tr -d '()') || {
+    VERSION="N/A"
+    log "No version info found for $DRIVER."
+  }
+
+  # If version was found, log and display
+  if [ -n "$VERSION" ]; then
+    display "Driver: $DRIVER, Version: $VERSION, Hash: $HASH"
+    log "Driver: $DRIVER, Version: $VERSION, Hash: $HASH"
+  else
+    display "Version not found for driver $DRIVER."
+    log "Version not found for driver $DRIVER."
+  fi
+
+  # Go back to the parent directory
+  cd ..
+done
+
+display "Driver update check completed."
+log "Driver update check completed."
