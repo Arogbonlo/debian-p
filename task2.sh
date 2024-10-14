@@ -93,5 +93,5 @@ for DRIVER in $INSTALLED_DRIVERS; do
   fi
 done
 
-display "Driver version and git hash check completed."
+display "Driver version and git hash check commpleted."
 log "Driver version and git hash check completed."
