@@ -3,96 +3,98 @@
 # Define variables
 REPO_URL="https://github.com/indilib/indi-3rdparty.git"
 LOCAL_DIR="$HOME/indi-3rdparty"
-LOG_FILE="$HOME/indi_driver_update.log"
-PROCESSED_FILE="$HOME/processed_drivers.log"
+LOG_FILE="$HOME/indi_driver_info.log"
+DEBUG_LOG="$HOME/indi_driver_debug.log"
 
-# Function to log messages to the file
+# Function to log messages to the file and display them
 log() {
-  echo "$(date): $1" >> "$LOG_FILE"
+  echo "$(date): $1" | tee -a "$LOG_FILE"
 }
 
-# Function to display messages in the terminal
-display() {
-  echo "$1"
+debug_log() {
+  echo "$(date): $1" >> "$DEBUG_LOG"
 }
-
-# Ensure the processed drivers log file exists
-if [ ! -f "$PROCESSED_FILE" ]; then
-  touch "$PROCESSED_FILE"
-fi
 
 # Increase Git buffer size to handle large repositories
 git config --global http.postBuffer 5242880000
 log "Increased Git buffer size to 500MB."
 
-# Ensure the directory exists, clone if it does not
+# Clone or update the repository
 if [ ! -d "$LOCAL_DIR" ]; then
-  display "Directory $LOCAL_DIR does not exist. Cloning repository..."
-  log "Directory $LOCAL_DIR does not exist. Cloning repository..."
-
-  # Clone repository with shallow depth, and limit to 1 thread
-  git clone --depth 1 --jobs 1 "$REPO_URL" "$LOCAL_DIR" --progress || {
-    display "Failed to clone repository."
+  log "Cloning repository to $LOCAL_DIR..."
+  git clone "$REPO_URL" "$LOCAL_DIR" || {
     log "Failed to clone repository."
     exit 1
   }
 else
-  display "Directory $LOCAL_DIR already exists, pulling latest changes..."
-  log "Directory $LOCAL_DIR already exists, pulling latest changes..."
+  log "Updating existing repository in $LOCAL_DIR..."
   cd "$LOCAL_DIR" && git pull || {
-    display "Failed to pull latest changes."
-    log "Failed to pull latest changes."
+    log "Failed to update repository."
     exit 1
   }
 fi
 
 # Navigate to the directory
-cd "$LOCAL_DIR" || { display "Failed to change directory to $LOCAL_DIR."; log "Failed to change directory to $LOCAL_DIR."; exit 1; }
-
-# Fetch driver information
-display "Fetching driver information from the repository..."
-log "Fetching driver information from the repository."
+cd "$LOCAL_DIR" || { log "Failed to change directory to $LOCAL_DIR."; exit 1; }
 
 # Get the list of driver directories
 DRIVERS=$(find . -maxdepth 1 -type d -not -path './.*' -not -path '.' | sed 's|^\./||')
 
-# Loop through each driver and get its version and latest git hash
-for DRIVER in $DRIVERS; do
-  display "Checking driver: $DRIVER"
-  log "Checking driver: $DRIVER"
+# Print header
+printf "%-30s %-15s %-40s %-20s\n" "Driver" "Version" "Last Commit Hash" "Last Commit Date" | tee -a "$LOG_FILE"
+printf "%-30s %-15s %-40s %-20s\n" "$(printf '%0.s-' {1..30})" "$(printf '%0.s-' {1..15})" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..20})" | tee -a "$LOG_FILE"
 
-  # Navigate into driver directory
-  cd "$DRIVER" || { display "Failed to change directory to $DRIVER."; log "Failed to change directory to $DRIVER."; continue; }
+# Function to extract version from various sources
+extract_version() {
+  local driver_dir="$1"
+  local version=""
 
-  # Get the latest git hash for the current driver
-  HASH=$(git log -1 --format="%H" 2>/dev/null) || {
-    display "Failed to get git hash for $DRIVER."
-    log "Failed to get git hash for $DRIVER."
-    continue
-  }
-
-  # Extract version from CMakeLists.txt or a similar file if it exists
-  VERSION=$(grep -m 1 "VERSION" CMakeLists.txt 2>/dev/null | cut -d ' ' -f 2 | tr -d '()') || {
-    VERSION="N/A"
-    log "No version info found for $DRIVER."
-  }
-
-  # Check if this version and hash have already been processed
-  if grep -q "$DRIVER:$VERSION:$HASH" "$PROCESSED_FILE"; then
-    display "Driver $DRIVER (Version: $VERSION, Hash: $HASH) has already been processed."
-    log "Driver $DRIVER (Version: $VERSION, Hash: $HASH) has already been processed."
-  else
-    # Log and display the driver information
-    display "Driver: $DRIVER, Version: $VERSION, Hash: $HASH"
-    log "Driver: $DRIVER, Version: $VERSION, Hash: $HASH"
-
-    # Record the driver as processed
-    echo "$DRIVER:$VERSION:$HASH" >> "$PROCESSED_FILE"
+  # Try debian/changelog
+  if [ -f "$driver_dir/debian/changelog" ]; then
+    version=$(head -n 1 "$driver_dir/debian/changelog" | sed -n 's/.(\([0-9][0-9.:~+-]\)).*/\1/p')
+    debug_log "Version from debian/changelog: $version"
   fi
 
-  # Go back to the parent directory
-  cd ..
+  # If not found, try CMakeLists.txt
+  if [ -z "$version" ] && [ -f "$driver_dir/CMakeLists.txt" ]; then
+    version=$(grep -i "set.version" "$driver_dir/CMakeLists.txt" | grep -v "CMAKE_MINIMUM_REQUIRED" | sed -n 's/.*VERSION[^0-9]\([0-9.]\+\).*/\1/p' | head -n 1)
+    debug_log "Version from CMakeLists.txt: $version"
+  fi
+
+  # If still not found, try any file containing version information
+  if [ -z "$version" ]; then
+    version=$(grep -r -i "version" "$driver_dir" 2>/dev/null | grep -v "CMAKE_MINIMUM_REQUIRED" | grep -o '[0-9]\+\.[0-9]\+\(\.[0-9]\+\)*' | head -n 1)
+    debug_log "Version from grep search: $version"
+  fi
+
+  echo "$version"
+}
+
+# Loop through each driver and get its version and git info
+for DRIVER in $DRIVERS; do
+  debug_log "Processing driver: $DRIVER"
+
+  # Extract version
+  VERSION=$(extract_version "$LOCAL_DIR/$DRIVER")
+  if [ -z "$VERSION" ]; then
+    VERSION="N/A"
+  fi
+  debug_log "Final version for $DRIVER: $VERSION"
+
+  # Get the latest git info for the current driver
+  HASH=$(git log -1 --format="%H" -- "$DRIVER" 2>/dev/null)
+  DATE=$(git log -1 --format="%ad" --date=short -- "$DRIVER" 2>/dev/null)
+  
+  if [ -z "$HASH" ] || [ -z "$DATE" ]; then
+    HASH="N/A"
+    DATE="N/A"
+  fi
+  debug_log "Git hash for $DRIVER: $HASH"
+  debug_log "Last commit date for $DRIVER: $DATE"
+
+  # Print the driver information
+  printf "%-30s %-15s %-40s %-20s\n" "$DRIVER" "$VERSION" "$HASH" "$DATE" | tee -a "$LOG_FILE"
 done
 
-display "Driver update check completed."
-log "Driver update check completed."
+log "Driver information extraction completed."
+log "Debug information saved to $DEBUG_LOG"

@@ -1,59 +1,97 @@
 #!/bin/bash
 
-# Set variables
-PACKAGE_LIST_FILE="package_list.txt"  # Temporary file to store package list
-REPO_BASE_PATH="https://github.com/indilib/indi-3rdparty.git"         # Base path where Git repositories are located
+# Define variables
+LOG_FILE="$HOME/debian_driver_update.log"
+PROCESSED_FILE="$HOME/debian_processed_drivers.log"
 
-# Function to handle errors
-handle_error() {
-    echo "Error: $1"
-    exit 1
+# Function to log messages to the file
+log() {
+  echo "$(date): $1" >> "$LOG_FILE"
 }
 
-# Update package list
-echo "Updating package list..."
-if ! sudo apt update; then
-    handle_error "Failed to update package list."
+# Function to display messages in the terminal
+display() {
+  echo "$1"
+}
+
+# Ensure the processed drivers log file exists
+if [ ! -f "$PROCESSED_FILE" ]; then
+  touch "$PROCESSED_FILE"
 fi
 
-# Get the list of installed packages and filter for 3rd-party packages
-echo "Retrieving installed 3rd-party packages..."
-if ! dpkg-query -W -f='${Package} ${Version}\n' | grep -i 'indi3rd-party' > "$PACKAGE_LIST_FILE"; then
-    handle_error "Failed to retrieve package list."
+# Fetch a list of installed drivers available as Debian packages
+display "Fetching list of installed drivers (Debian packages)..."
+log "Fetching list of installed drivers (Debian packages)..."
+INSTALLED_DRIVERS=$(dpkg-query -W -f='${binary:Package}\n' | grep -i "driver")
+
+if [ -z "$INSTALLED_DRIVERS" ]; then
+  display "No drivers found installed via Debian packages."
+  log "No drivers found installed via Debian packages."
+  exit 0
 fi
 
-# Check if any packages were found
-if [ ! -s "$PACKAGE_LIST_FILE" ]; then
-    handle_error "No 3rd-party packages found."
-fi
+# Loop through each installed driver and get its version and source repository
+for DRIVER in $INSTALLED_DRIVERS; do
+  display "Checking driver: $DRIVER"
+  log "Checking driver: $DRIVER"
 
-# Loop through each package to get version and git hash
-echo "Gathering version and git hash information for each package..."
-while read -r line; do
-    PACKAGE_NAME=$(echo "$line" | awk '{print $1}')
-    DEBIAN_VERSION=$(echo "$line" | awk '{print $2}')
+  # Get the installed version of the current driver
+  VERSION=$(dpkg-query -W -f='${Version}' "$DRIVER") || {
+    display "Failed to get version for $DRIVER."
+    log "Failed to get version for $DRIVER."
+    continue
+  }
 
-    # Construct the path to the Git repository for this package
-    GIT_REPO_PATH="$REPO_BASE_PATH/$PACKAGE_NAME"
+  # Check if this driver has already been processed
+  if grep -q "$DRIVER:$VERSION" "$PROCESSED_FILE"; then
+    display "Driver $DRIVER (Version: $VERSION) has already been processed."
+    log "Driver $DRIVER (Version: $VERSION) has already been processed."
+  else
+    # Download the package source to look for VCS information
+    display "Downloading source for $DRIVER..."
+    log "Downloading source for $DRIVER..."
+    apt-get source "$DRIVER" >/dev/null 2>&1  # Download source without output
+    SRC_DIR=$(find . -maxdepth 1 -type d -name "$DRIVER-*")  # Find the source directory
 
-    # Check if the directory exists before attempting to get the Git hash
-    if [ -d "$GIT_REPO_PATH" ]; then
-        # Get the latest commit hash from the git repository
-        GIT_HASH=$(git -C "$GIT_REPO_PATH" rev-parse HEAD 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            GIT_HASH="N/A"  # If there's an error getting the hash, set it to N/A
-        fi
+    # Look for VCS information in debian/control or debian/copyright
+    VCS_URL=$(grep -E 'Vcs-Git|Vcs-Browser' "$SRC_DIR/debian/control" 2>/dev/null | head -n 1 | awk '{print $2}')
+    
+    if [ -n "$VCS_URL" ]; then
+      display "Found VCS URL for $DRIVER: $VCS_URL"
+      log "Found VCS URL for $DRIVER: $VCS_URL"
+
+      # Optionally, clone the repository and get the latest git hash
+      git clone "$VCS_URL" "${DRIVER}_source" >/dev/null 2>&1
+      if [ -d "${DRIVER}_source/.git" ]; then
+        HASH=$(git -C "${DRIVER}_source" log -1 --format="%H") || {
+          display "Failed to get git hash for $DRIVER."
+          log "Failed to get git hash for $DRIVER."
+          HASH="N/A"
+        }
+      else
+        HASH="N/A"
+        display "Git repository not found after cloning for $DRIVER."
+        log "Git repository not found after cloning for $DRIVER."
+      fi
+      # Clean up cloned repo
+      rm -rf "${DRIVER}_source"
     else
-        GIT_HASH="N/A"  # If the directory doesn't exist, set it to N/A
+      HASH="N/A"
+      display "No VCS information found for $DRIVER."
+      log "No VCS information found for $DRIVER."
     fi
 
-    # Output driver information
-    echo "Package: $PACKAGE_NAME, Debian Version: $DEBIAN_VERSION, Git Hash: $GIT_HASH"
-done < "$PACKAGE_LIST_FILE"
+    # Log and display the driver information
+    display "Driver: $DRIVER, Version: $VERSION, Git Hash: $HASH"
+    log "Driver: $DRIVER, Version: $VERSION, Git Hash: $HASH"
 
-# Clean up temporary file only if it exists
-if [ -f "$PACKAGE_LIST_FILE" ]; then
-    rm "$PACKAGE_LIST_FILE"
-fi
+    # Record the driver as processed
+    echo "$DRIVER:$VERSION:$HASH" >> "$PROCESSED_FILE"
 
-echo "Script completed successfully."
+    # Clean up the downloaded source directory
+    rm -rf "$SRC_DIR"
+  fi
+done
+
+display "Driver version and git hash check completed."
+log "Driver version and git hash check completed."
