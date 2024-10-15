@@ -5,6 +5,7 @@ REPO_URL="https://github.com/indilib/indi-3rdparty.git"
 LOCAL_DIR="$HOME/indi-3rdparty"
 LOG_FILE="$HOME/indi_driver_info.log"
 DEBUG_LOG="$HOME/indi_driver_debug.log"
+EXCLUDE_FILE="$HOME/excluded_drivers.txt"  # the file that contains the list of directories to ignore
 
 # Function to log messages to the file and display them
 log() {
@@ -37,8 +38,19 @@ fi
 # Navigate to the directory
 cd "$LOCAL_DIR" || { log "Failed to change directory to $LOCAL_DIR."; exit 1; }
 
-# Get the list of driver directories
+# Get the list of excluded drivers if the file exists
+if [ -f "$EXCLUDE_FILE" ]; then
+  EXCLUDED_DRIVERS=$(cat "$EXCLUDE_FILE" | tr '\n' ' ')
+  log "Excluding drivers from list: $EXCLUDED_DRIVERS"
+fi
+
+# Get the list of driver directories, excluding ignored ones
 DRIVERS=$(find . -maxdepth 1 -type d -not -path './.*' -not -path '.' | sed 's|^\./||')
+
+# Remove excluded drivers
+for EXCLUDED in $EXCLUDED_DRIVERS; do
+  DRIVERS=$(echo "$DRIVERS" | grep -v "$EXCLUDED")
+done
 
 # Print header
 printf "%-30s %-40s\n" "Driver" "Version" | tee -a "$LOG_FILE"
@@ -80,7 +92,7 @@ format_version_string() {
   local formatted_date=$(date -d "$date" +"%Y%m%d" 2>/dev/null)
 
   # Using the first 7 characters of the hash
-  local short_hash=$(echo "$hash" | cut -c1-7)
+  local short_hash=$(echo "$hash" | cut -c1-8)  # Correct the hash length to 8 digits
 
   # Format the final version string
   if [ -n "$version" ] && [ -n "$formatted_date" ] && [ -n "$short_hash" ]; then
@@ -101,10 +113,10 @@ for DRIVER in $DRIVERS; do
   fi
   debug_log "Final version for $DRIVER: $VERSION"
 
-  # get the latest git info for the current driver
+  # Get the latest git info for the current driver
   HASH=$(git log -1 --format="%H" -- "$DRIVER" 2>/dev/null)
   DATE=$(git log -1 --format="%ad" --date=short -- "$DRIVER" 2>/dev/null)
-  
+
   if [ -z "$HASH" ] || [ -z "$DATE" ]; then
     HASH="N/A"
     DATE="N/A"
