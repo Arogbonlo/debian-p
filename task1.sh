@@ -41,8 +41,8 @@ cd "$LOCAL_DIR" || { log "Failed to change directory to $LOCAL_DIR."; exit 1; }
 DRIVERS=$(find . -maxdepth 1 -type d -not -path './.*' -not -path '.' | sed 's|^\./||')
 
 # Print header
-printf "%-30s %-15s %-40s %-20s\n" "Driver" "Version" "Last Commit Hash" "Last Commit Date" | tee -a "$LOG_FILE"
-printf "%-30s %-15s %-40s %-20s\n" "$(printf '%0.s-' {1..30})" "$(printf '%0.s-' {1..15})" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..20})" | tee -a "$LOG_FILE"
+printf "%-30s %-40s\n" "Driver" "Version" | tee -a "$LOG_FILE"
+printf "%-30s %-40s\n" "$(printf '%0.s-' {1..30})" "$(printf '%0.s-' {1..40})" | tee -a "$LOG_FILE"
 
 # Function to extract version from various sources
 extract_version() {
@@ -51,7 +51,7 @@ extract_version() {
 
   # Try debian/changelog
   if [ -f "$driver_dir/debian/changelog" ]; then
-    version=$(head -n 1 "$driver_dir/debian/changelog" | sed -n 's/.(\([0-9][0-9.:~+-]\)).*/\1/p')
+    version=$(head -n 1 "$driver_dir/debian/changelog" | sed -n 's/.*(\([0-9][0-9.:~+-]*\)).*/\1/p')
     debug_log "Version from debian/changelog: $version"
   fi
 
@@ -70,6 +70,26 @@ extract_version() {
   echo "$version"
 }
 
+# Function to format the version string in the desired format
+format_version_string() {
+  local version="$1"
+  local date="$2"
+  local hash="$3"
+
+  # format date as YYYYMMDD
+  local formatted_date=$(date -d "$date" +"%Y%m%d" 2>/dev/null)
+
+  # Using the first 7 characters of the hash
+  local short_hash=$(echo "$hash" | cut -c1-7)
+
+  # Format the final version string
+  if [ -n "$version" ] && [ -n "$formatted_date" ] && [ -n "$short_hash" ]; then
+    echo "${version}~git${formatted_date}.${short_hash}"
+  else
+    echo "N/A"
+  fi
+}
+
 # Loop through each driver and get its version and git info
 for DRIVER in $DRIVERS; do
   debug_log "Processing driver: $DRIVER"
@@ -81,7 +101,7 @@ for DRIVER in $DRIVERS; do
   fi
   debug_log "Final version for $DRIVER: $VERSION"
 
-  # Get the latest git info for the current driver
+  # get the latest git info for the current driver
   HASH=$(git log -1 --format="%H" -- "$DRIVER" 2>/dev/null)
   DATE=$(git log -1 --format="%ad" --date=short -- "$DRIVER" 2>/dev/null)
   
@@ -92,8 +112,11 @@ for DRIVER in $DRIVERS; do
   debug_log "Git hash for $DRIVER: $HASH"
   debug_log "Last commit date for $DRIVER: $DATE"
 
+  # Format the version string
+  FINAL_VERSION=$(format_version_string "$VERSION" "$DATE" "$HASH")
+
   # Print the driver information
-  printf "%-30s %-15s %-40s %-20s\n" "$DRIVER" "$VERSION" "$HASH" "$DATE" | tee -a "$LOG_FILE"
+  printf "%-30s %-40s\n" "$DRIVER" "$FINAL_VERSION" | tee -a "$LOG_FILE"
 done
 
 log "Driver information extraction completed."
