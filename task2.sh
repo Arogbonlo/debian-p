@@ -3,6 +3,7 @@
 # Define variables
 LOG_FILE="$HOME/debian_driver_update.log"
 PROCESSED_FILE="$HOME/debian_processed_drivers.log"
+RELEASE=$(lsb_release -sc)
 
 # Function to log messages to the file
 log() {
@@ -43,55 +44,27 @@ for DRIVER in $INSTALLED_DRIVERS; do
   }
 
   # Check if this driver has already been processed
-  if grep -q "$DRIVER:$VERSION" "$PROCESSED_FILE"; then
+  if grep -i -q "$DRIVER:$VERSION" "$PROCESSED_FILE"; then
     display "Driver $DRIVER (Version: $VERSION) has already been processed."
     log "Driver $DRIVER (Version: $VERSION) has already been processed."
   else
-    # Download the package source to look for VCS information
-    display "Downloading source for $DRIVER..."
-    log "Downloading source for $DRIVER..."
-    apt-get source "$DRIVER" >/dev/null 2>&1  # Download source without output
+    # Download the package source using the current release
+    display "Downloading source for $DRIVER (Release: $RELEASE)..."
+    log "Downloading source for $DRIVER (Release: $RELEASE)..."
+    apt-get source -t "$RELEASE" "$DRIVER" >/dev/null 2>&1  # Download source using the detected release
     SRC_DIR=$(find . -maxdepth 1 -type d -name "$DRIVER-*")  # Find the source directory
 
-    # Look for VCS information in debian/control or debian/copyright
-    VCS_URL=$(grep -E 'Vcs-Git|Vcs-Browser' "$SRC_DIR/debian/control" 2>/dev/null | head -n 1 | awk '{print $2}')
-    
-    if [ -n "$VCS_URL" ]; then
-      display "Found VCS URL for $DRIVER: $VCS_URL"
-      log "Found VCS URL for $DRIVER: $VCS_URL"
-
-      # Optionally, clone the repository and get the latest git hash
-      git clone "$VCS_URL" "${DRIVER}_source" >/dev/null 2>&1
-      if [ -d "${DRIVER}_source/.git" ]; then
-        HASH=$(git -C "${DRIVER}_source" log -1 --format="%H") || {
-          display "Failed to get git hash for $DRIVER."
-          log "Failed to get git hash for $DRIVER."
-          HASH="N/A"
-        }
-      else
-        HASH="N/A"
-        display "Git repository not found after cloning for $DRIVER."
-        log "Git repository not found after cloning for $DRIVER."
-      fi
-      # Clean up cloned repo
-      rm -rf "${DRIVER}_source"
-    else
-      HASH="N/A"
-      display "No VCS information found for $DRIVER."
-      log "No VCS information found for $DRIVER."
-    fi
-
     # Log and display the driver information
-    display "Driver: $DRIVER, Version: $VERSION, Git Hash: $HASH"
-    log "Driver: $DRIVER, Version: $VERSION, Git Hash: $HASH"
+    display "Driver: $DRIVER, Version: $VERSION"
+    log "Driver: $DRIVER, Version: $VERSION"
 
     # Record the driver as processed
-    echo "$DRIVER:$VERSION:$HASH" >> "$PROCESSED_FILE"
+    echo "$DRIVER:$VERSION" >> "$PROCESSED_FILE"
 
     # Clean up the downloaded source directory
     rm -rf "$SRC_DIR"
   fi
 done
 
-display "Driver version and git hash check commpleted."
-log "Driver version and git hash check completed."
+display "Driver version check completed."
+log "Driver version check completed."
