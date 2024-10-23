@@ -3,7 +3,7 @@
 # Define variables
 LOG_FILE="$HOME/debian_driver_update.log"
 PROCESSED_FILE="$HOME/debian_processed_drivers.log"
-RELEASE=$(lsb_release -sc)
+RELEASE="unstable"  # Set to use the unstable release
 
 # Function to log messages to the file
 log() {
@@ -20,24 +20,26 @@ if [ ! -f "$PROCESSED_FILE" ]; then
   touch "$PROCESSED_FILE"
 fi
 
-# Fetch a list of installed drivers available as Debian packages
-display "Fetching list of installed drivers (Debian packages)..."
-log "Fetching list of installed drivers (Debian packages)..."
-INSTALLED_DRIVERS=$(dpkg-query -W -f='${binary:Package}\n' | grep -i "driver")
+# Fetch a list of drivers from the Debian repository
+display "Fetching list of drivers from Debian repository for release $RELEASE..."
+log "Fetching list of drivers from Debian repository for release $RELEASE..."
 
-if [ -z "$INSTALLED_DRIVERS" ]; then
-  display "No drivers found installed via Debian packages."
-  log "No drivers found installed via Debian packages."
+# Use apt-cache madison to fetch available packages 
+DRIVER_PACKAGES=$(apt-cache search "driver" | awk '{print $1}')
+
+if [ -z "$DRIVER_PACKAGES" ]; then
+  display "No drivers found in the repository for release $RELEASE."
+  log "No drivers found in the repository for release $RELEASE."
   exit 0
 fi
 
-# Loop through each installed driver and get its version and source repository
-for DRIVER in $INSTALLED_DRIVERS; do
-  display "Checking driver: $DRIVER"
-  log "Checking driver: $DRIVER"
+# Loop through each package to fetch version and check if processed
+for DRIVER in $DRIVER_PACKAGES; do
+  display "Checking driver package: $DRIVER"
+  log "Checking driver package: $DRIVER"
 
-  # Get the installed version of the current driver
-  VERSION=$(dpkg-query -W -f='${Version}' "$DRIVER") || {
+  # Get the latest version from the changelog or repository
+  VERSION=$(apt-cache madison "$DRIVER" | head -n 1 | awk '{print $3}') || {
     display "Failed to get version for $DRIVER."
     log "Failed to get version for $DRIVER."
     continue
@@ -48,11 +50,11 @@ for DRIVER in $INSTALLED_DRIVERS; do
     display "Driver $DRIVER (Version: $VERSION) has already been processed."
     log "Driver $DRIVER (Version: $VERSION) has already been processed."
   else
-    # Download the package source using the current release
+    # Download the package source using the detected release
     display "Downloading source for $DRIVER (Release: $RELEASE)..."
     log "Downloading source for $DRIVER (Release: $RELEASE)..."
-    apt-get source -t "$RELEASE" "$DRIVER" >/dev/null 2>&1  # Download source using the detected release
-    SRC_DIR=$(find . -maxdepth 1 -type d -name "$DRIVER-*")  # Find the source directory
+    apt-get source -t "$RELEASE" "$DRIVER" >/dev/null 2>&1  # Download source using the "unstable" release
+    SRC_DIR=$(find . -maxdepth 1 -type d -name "$DRIVER-*")  # to find the source directory
 
     # Log and display the driver information
     display "Driver: $DRIVER, Version: $VERSION"
