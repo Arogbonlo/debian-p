@@ -25,26 +25,18 @@ display "Checking if the 'unstable' sources are configured..."
 log "Checking if the 'unstable' sources are configured..."
 
 if ! grep -qr "deb .* unstable" /etc/apt/sources.list /etc/apt/sources.list.d/*.list; then
-  # Unstable not found, adding it to /etc/apt/sources.list.d/unstable.list
-  display "'unstable' is not configured. Adding 'unstable' sources to /etc/apt/sources.list.d/unstable.list."
-  log "'unstable' is not configured. Adding 'unstable' sources to /etc/apt/sources.list.d/unstable.list."
-  echo "deb http://deb.debian.org/debian unstable main contrib non-free" | sudo tee -a /etc/apt/sources.list.d/unstable.list
-  echo "deb-src http://deb.debian.org/debian unstable main contrib non-free" | sudo tee -a /etc/apt/sources.list.d/unstable.list
+  display "'unstable' is not configured. Please configure the 'unstable' source manually."
+  log "'unstable' is not configured. Please configure the 'unstable' source manually."
 else
   display "'unstable' sources are already configured."
   log "'unstable' sources are already configured."
 fi
 
-# Update the package cache
-display "Updating package cache for 'unstable' sources..."
-log "Updating package cache for 'unstable' sources..."
-sudo apt-get update -o Dir::Etc::sourcelist="/etc/apt/sources.list.d/unstable.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"
-
 # Fetch a list of drivers from the Debian repository
 display "Fetching list of drivers from Debian repository for release $RELEASE..."
 log "Fetching list of drivers from Debian repository for release $RELEASE..."
 
-# Use apt-cache search to fetch available driver packages
+# Use apt-cache to search for available driver packages
 DRIVER_PACKAGES=$(apt-cache search "driver" | awk '{print $1}')
 
 if [ -z "$DRIVER_PACKAGES" ]; then
@@ -70,21 +62,12 @@ for DRIVER in $DRIVER_PACKAGES; do
     display "Driver $DRIVER (Version: $VERSION) has already been processed."
     log "Driver $DRIVER (Version: $VERSION) has already been processed."
   else
-    # Download the package source using the detected release
-    display "Downloading source for $DRIVER (Release: $RELEASE)..."
-    log "Downloading source for $DRIVER (Release: $RELEASE)..."
-    apt-get source -t "$RELEASE" "$DRIVER" >/dev/null 2>&1  # Download source using the "unstable" release
-    SRC_DIR=$(find . -maxdepth 1 -type d -name "$DRIVER-*")  # to find the source directory
-
-    # Log and display the driver information
+    # Display the driver information
     display "Driver: $DRIVER, Version: $VERSION"
     log "Driver: $DRIVER, Version: $VERSION"
 
     # Record the driver as processed
     echo "$DRIVER:$VERSION" >> "$PROCESSED_FILE"
-
-    # Clean up the downloaded source directory
-    rm -rf "$SRC_DIR"
   fi
 done
 
